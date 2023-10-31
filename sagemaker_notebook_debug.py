@@ -50,31 +50,43 @@ def __get_fields_info__(dtype: DataType, name: str = ""):
     if isinstance(dtype, StructType):
         for field in dtype.fields:
             for child in __get_fields_info__(field.dataType, field.name):
-                wrapped_child = ["{prefix}{suffix}".format(
-                    prefix=("" if name == "" else "`{}`.".format(name)), suffix=child[0])] + child[1:]
+                wrapped_child = [
+                    "{prefix}{suffix}".format(
+                        prefix="" if not name else f"`{name}`.",
+                        suffix=child[0],
+                    )
+                ] + child[1:]
                 ret.append(wrapped_child)
     elif isinstance(dtype, ArrayType) and (
-            isinstance(dtype.elementType, ArrayType) or isinstance(dtype.elementType, StructType)):
-        for child in __get_fields_info__(dtype.elementType):
-            wrapped_child = ["`{}`".format(name)] + child
-            ret.append(wrapped_child)
+        isinstance(dtype.elementType, (ArrayType, StructType))
+    ):
+        ret.extend(
+            [f"`{name}`"] + child
+            for child in __get_fields_info__(dtype.elementType)
+        )
     else:
-        return [["`{}`".format(name)]]
+        return [[f"`{name}`"]]
     return ret
 
 
 def normalise_fields_names(df: DataFrame, fieldname_normaliser=__normalise_fieldname__):
-    return df.select([
-        f.col("`{}`".format(field.name)).cast(__rename_nested_field__(field.dataType, fieldname_normaliser))
-            .alias(fieldname_normaliser(field.name)) for field in df.schema.fields
-    ])
+    return df.select(
+        [
+            f.col(f"`{field.name}`")
+            .cast(
+                __rename_nested_field__(field.dataType, fieldname_normaliser)
+            )
+            .alias(fieldname_normaliser(field.name))
+            for field in df.schema.fields
+        ]
+    )
 
 
 def flatten(df: DataFrame, fieldname_normaliser=__normalise_fieldname__):
     cols = []
     for child in __get_fields_info__(df.schema):
         if len(child) > 2:
-            ex = "x.{}".format(child[-1])
+            ex = f"x.{child[-1]}"
             for seg in child[-2:0:-1]:
                 if seg != '``':
                     ex = "transform(x.{outer}, x -> {inner})".format(outer=seg, inner=ex)
@@ -128,11 +140,14 @@ def get_input_path(b_name, i_path, days):
     date_array = \
         (start + timedelta(days=x) for x in range(0, (end - start).days))
 
-    s3_read_path = []
-    for date_object in date_array:
-        s3_read_path.append(
-            str("s3a://" + bucket + "/" + prefix + "partition-date=" + date_object.strftime("%Y-%m-%d") + "/"))
-
+    s3_read_path = [
+        str(
+            f"s3a://{bucket}/{prefix}partition-date="
+            + date_object.strftime("%Y-%m-%d")
+            + "/"
+        )
+        for date_object in date_array
+    ]
     if len(s3_read_path) <= 0:
         raise Exception("ERROR: Files not found s3://{}/{}/", format(bucket_name, input_path))
     return s3_read_path
@@ -264,6 +279,6 @@ e_data_frame = extract_data(e_s3_read_path, read_file_format)
 print(e_data_frame)
 t_data_frame = transform_data(e_data_frame)
 print(t_data_frame)
-l_s3_write_path = str("s3a://" + s3_path)
+l_s3_write_path = str(f"s3a://{s3_path}")
 print(l_s3_write_path)
 load_data(t_data_frame, l_s3_write_path, write_file_format)
